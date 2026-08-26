@@ -1,15 +1,12 @@
 import os, json, logging, html, re, random
 from datetime import datetime
-from dotenv import load_dotenv
 from telebot import TeleBot, types
 from telebot.types import MessageEntity
 
-load_dotenv()
-
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8868540804:AAEmU9LCSYXxQHRFE5-XRBVHaiZm_ie2SvQ")
+BOT_TOKEN = "8868540804:AAEmU9LCSYXxQHRFE5-XRBVHaiZm_ie2SvQ"
 ADMIN_IDS = [8498419947]
-DATA_FILE = os.path.join(os.getcwd(), "data.json")
-WELCOME_DIR = os.path.join(os.getcwd(), "welcome_files")
+DATA_FILE = "/data/data.json"
+WELCOME_DIR = "/data/welcome_files"
 os.makedirs(WELCOME_DIR, exist_ok=True)
 
 # ═══════ PREMIUM EMOJI MAPPING (44 EMOJIS) ═══════
@@ -150,12 +147,12 @@ def extract_button_icon(text):
 # ⭐ FIXED: colored_btn - icon hai to style nahi, style hai to icon nahi
 def colored_btn(text, url=None, callback=None, color="primary", icon_emoji_id=None):
     if icon_emoji_id:
-        # Icon ke saath button (colored nahi, icon dikhega)
+        # Icon ke saath button - style mat bhejo
         if url:
             return types.InlineKeyboardButton(text, url=url, icon_custom_emoji_id=icon_emoji_id)
         return types.InlineKeyboardButton(text, callback_data=callback, icon_custom_emoji_id=icon_emoji_id)
     else:
-        # Bina icon ke colored button
+        # Bina icon ke - colored button
         if url:
             return types.InlineKeyboardButton(text, url=url, style=color)
         return types.InlineKeyboardButton(text, callback_data=callback, style=color)
@@ -310,8 +307,8 @@ def start(message: types.Message):
         text = f"""╔══════════════════════╗\n║  🏆 <b>ALL-IN-ONE BOT</b>  ║\n╚══════════════════════╝\n👑 <b>Admin:</b> {user.first_name}\n📋 /welcome | /stats | /pin | /help\n\n📥 <b>Join Accept:</b> {join_status}\n\n<i>💡 Admin = Normal | Forward = Forward Tag</i>\n<i>💎 44 Premium Emojis!</i>"""
         markup = types.InlineKeyboardMarkup(row_width=2)
         markup.add(
-            colored_btn("START ✅", callback="join_on", color="success", icon_emoji_id="6113743365826677162"),
-            colored_btn("OFF 🔴", callback="join_off", color="danger", icon_emoji_id="4992743110430687913")
+            colored_btn("START ✅", callback="join_on", color="success"),
+            colored_btn("OFF 🔴", callback="join_off", color="danger")
         )
         markup.add(colored_btn("Welcome", callback="welcome_menu", color="primary"), colored_btn("Stats", callback="stats", color="success"))
         send_html(message.chat.id, text, reply_markup=markup)
