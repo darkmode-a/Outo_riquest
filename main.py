@@ -5,8 +5,6 @@ from telebot.types import MessageEntity
 
 BOT_TOKEN = "8868540804:AAEmU9LCSYXxQHRFE5-XRBVHaiZm_ie2SvQ"
 ADMIN_IDS = [8498419947]
-
-# ═══════ RENDER SAFE PATHS (SAB JAGAH CHALEGA) ═══════
 DATA_FILE = os.path.join(os.getcwd(), "data.json")
 WELCOME_DIR = os.path.join(os.getcwd(), "welcome_files")
 os.makedirs(WELCOME_DIR, exist_ok=True)
@@ -62,7 +60,6 @@ PREMIUM_EMOJI_MAP = {
 }
 
 COLOR_MAP = {"blue": "primary", "green": "success", "red": "danger"}
-COLOR_EMOJI = {"primary": "🔵", "success": "🟢", "danger": "🔴"}
 
 DEFAULT_CAPTIONS = {
     "video": "✅NEW HACK How To Activate Hack✅\n  Pls Video Ko Pura Dekhna\n        ✅ Setup Video ✅\n\n✅ FULL NUMBER WORKING  ✅",
@@ -147,12 +144,11 @@ def extract_button_icon(text):
             return clean_text, icon_id
     return text, None
 
-def colored_btn(text, url=None, callback=None, color="primary"):
-    emoji = COLOR_EMOJI.get(color, "🔵")
-    display_text = f"{emoji} {text}"
+# ⭐ STYLE COLOR BUTTON - NO EMOJI PREFIX
+def colored_btn(text, url=None, callback=None, color="primary", icon_emoji_id=None):
     if url:
-        return types.InlineKeyboardButton(display_text, url=url)
-    return types.InlineKeyboardButton(display_text, callback_data=callback)
+        return types.InlineKeyboardButton(text, url=url, style=color)
+    return types.InlineKeyboardButton(text, callback_data=callback, style=color)
 
 def build_keyboard_with_rows(buttons_list):
     mrk = types.InlineKeyboardMarkup(row_width=2)
@@ -165,8 +161,7 @@ def build_keyboard_with_rows(buttons_list):
         if icon_id:
             buttons_by_row[row].append(types.InlineKeyboardButton(b['text'], url=b.get("url"), icon_custom_emoji_id=icon_id))
         else:
-            emoji = COLOR_EMOJI.get(b.get("color","primary"), "🔵")
-            buttons_by_row[row].append(types.InlineKeyboardButton(f"{emoji} {b['text']}", url=b.get("url")))
+            buttons_by_row[row].append(types.InlineKeyboardButton(b['text'], url=b.get("url"), style=b.get("color","primary")))
     for row_num in sorted(buttons_by_row.keys()):
         row_buttons = buttons_by_row[row_num]
         if len(row_buttons) == 1:
@@ -614,7 +609,6 @@ def admin_broadcast(message: types.Message):
 def main():
     logger.info("🤖 ALL-IN-ONE BOT STARTING...")
     logger.info(f"💾 Data Path: {DATA_FILE}")
-    logger.info(f"📁 Welcome Dir: {WELCOME_DIR}")
     if os.path.exists(DATA_FILE):
         try:
             with open(DATA_FILE, 'r') as f: json.load(f)
@@ -626,7 +620,7 @@ def main():
     logger.info(f"✅ @{bot_info.username}")
     logger.info(f"💎 Premium Emojis: {len(PREMIUM_EMOJI_MAP)} LOADED!")
     logger.info(f"📥 Join Accept: {'ON' if data.get('join_enabled', True) else 'OFF'}")
-    logger.info(f"🎯 Colored Buttons: Emoji prefix system!")
+    logger.info(f"🎯 Style Color Buttons ACTIVE!")
     bot.infinity_polling(timeout=10, long_polling_timeout=5)
 
 if __name__ == "__main__":
