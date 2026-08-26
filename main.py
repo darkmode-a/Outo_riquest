@@ -168,16 +168,17 @@ def extract_button_icon(text):
             return clean_text, icon_id
     return text, None
 
-# ⭐ FIXED: colored_btn - icon hai to style nahi, style hai to icon nahi
-def colored_btn(text, url=None, callback=None, color="primary", icon_emoji_id=None):
-    if icon_emoji_id:
-        if url:
-            return types.InlineKeyboardButton(text, url=url, icon_custom_emoji_id=icon_emoji_id)
-        return types.InlineKeyboardButton(text, callback_data=callback, icon_custom_emoji_id=icon_emoji_id)
-    else:
-        if url:
-            return types.InlineKeyboardButton(text, url=url, style=color)
-        return types.InlineKeyboardButton(text, callback_data=callback, style=color)
+# ⭐ COLORED BUTTON - SIRF STYLE (NO ICON CONFLICT)
+def colored_btn(text, url=None, callback=None, color="primary"):
+    if url:
+        return types.InlineKeyboardButton(text, url=url, style=color)
+    return types.InlineKeyboardButton(text, callback_data=callback, style=color)
+
+# ⭐ ICON BUTTON - SIRF ICON (NO STYLE)
+def icon_btn(text, url=None, callback=None, icon_emoji_id=None):
+    if url:
+        return types.InlineKeyboardButton(text, url=url, icon_custom_emoji_id=icon_emoji_id)
+    return types.InlineKeyboardButton(text, callback_data=callback, icon_custom_emoji_id=icon_emoji_id)
 
 def build_keyboard_with_rows(buttons_list):
     mrk = types.InlineKeyboardMarkup(row_width=2)
@@ -187,9 +188,10 @@ def build_keyboard_with_rows(buttons_list):
         if row not in buttons_by_row:
             buttons_by_row[row] = []
         icon_id = b.get("icon_emoji_id", None)
-        buttons_by_row[row].append(colored_btn(
-            b['text'], url=b["url"], color=b.get("color","primary"), icon_emoji_id=icon_id
-        ))
+        if icon_id:
+            buttons_by_row[row].append(icon_btn(b['text'], url=b.get("url"), icon_emoji_id=icon_id))
+        else:
+            buttons_by_row[row].append(colored_btn(b['text'], url=b.get("url"), color=b.get("color","primary")))
     for row_num in sorted(buttons_by_row.keys()):
         row_buttons = buttons_by_row[row_num]
         if len(row_buttons) == 1:
@@ -343,9 +345,10 @@ def start(message: types.Message):
         join_status = "🟢 ON" if data.get("join_enabled", True) else "🔴 OFF"
         text = f"""╔══════════════════════╗\n║  🏆 <b>ALL-IN-ONE BOT</b>  ║\n╚══════════════════════╝\n👑 <b>Admin:</b> {user.first_name}\n📋 /welcome | /stats | /pin | /help\n\n📥 <b>Join Accept:</b> {join_status}\n\n<i>💎 44 Premium Emojis!</i>"""
         markup = types.InlineKeyboardMarkup(row_width=2)
+        # ⭐ SIRF COLORED BUTTONS (NO ICON CONFLICT)
         markup.add(
-            colored_btn("START ✅", callback="join_on", color="success", icon_emoji_id="6113743365826677162"),
-            colored_btn("OFF 🔴", callback="join_off", color="danger", icon_emoji_id="4992743110430687913")
+            colored_btn("START", callback="join_on", color="success"),
+            colored_btn("OFF", callback="join_off", color="danger")
         )
         markup.add(colored_btn("Welcome", callback="welcome_menu", color="primary"), colored_btn("Stats", callback="stats", color="success"))
         send_html(message.chat.id, text, reply_markup=markup)
