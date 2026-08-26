@@ -61,6 +61,9 @@ PREMIUM_EMOJI_MAP = {
 
 COLOR_MAP = {"blue": "primary", "green": "success", "red": "danger"}
 
+# ⭐ COLOR EMOJI FOR BUTTONS (100% VISIBLE)
+COLOR_EMOJI = {"primary": "🔵", "success": "🟢", "danger": "🔴"}
+
 DEFAULT_CAPTIONS = {
     "video": "✅NEW HACK How To Activate Hack✅\n  Pls Video Ko Pura Dekhna\n        ✅ Setup Video ✅\n\n✅ FULL NUMBER WORKING  ✅",
     "document": "📥 📌 🎥\n\n👆 DOWNLOAD & USE FAST 💸\n\n💎 MINIMUM DEPOSIT 300+ 💎\n\n🔥 FULL NUMBER WORKING 🔥",
@@ -144,10 +147,14 @@ def extract_button_icon(text):
             return clean_text, icon_id
     return text, None
 
+# ⭐ FIXED: Colored Button - Emoji prefix se color dikhega
 def colored_btn(text, url=None, callback=None, color="primary", icon_emoji_id=None):
+    emoji = COLOR_EMOJI.get(color, "🔵")
+    display_text = f"{emoji} {text}"
+    
     if url:
-        return types.InlineKeyboardButton(text, url=url, style=color, icon_custom_emoji_id=icon_emoji_id)
-    return types.InlineKeyboardButton(text, callback_data=callback, style=color, icon_custom_emoji_id=icon_emoji_id)
+        return types.InlineKeyboardButton(display_text, url=url)
+    return types.InlineKeyboardButton(display_text, callback_data=callback)
 
 def build_keyboard_with_rows(buttons_list):
     mrk = types.InlineKeyboardMarkup(row_width=2)
@@ -157,7 +164,13 @@ def build_keyboard_with_rows(buttons_list):
         if row not in buttons_by_row:
             buttons_by_row[row] = []
         icon_id = b.get("icon_emoji_id", None)
-        buttons_by_row[row].append(colored_btn(b['text'], url=b["url"], color=b.get("color","primary"), icon_emoji_id=icon_id))
+        if icon_id:
+            # Icon button (premium emoji)
+            buttons_by_row[row].append(types.InlineKeyboardButton(b['text'], url=b.get("url"), icon_custom_emoji_id=icon_id))
+        else:
+            # Colored button (emoji prefix)
+            emoji = COLOR_EMOJI.get(b.get("color","primary"), "🔵")
+            buttons_by_row[row].append(types.InlineKeyboardButton(f"{emoji} {b['text']}", url=b.get("url")))
     for row_num in sorted(buttons_by_row.keys()):
         row_buttons = buttons_by_row[row_num]
         if len(row_buttons) == 1:
@@ -299,8 +312,8 @@ def start(message: types.Message):
         text = f"""╔══════════════════════╗\n║  🏆 <b>ALL-IN-ONE BOT</b>  ║\n╚══════════════════════╝\n👑 <b>Admin:</b> {user.first_name}\n📋 /welcome | /stats | /pin | /help\n\n📥 <b>Join Accept:</b> {join_status}\n\n<i>💡 Admin = Normal | Forward = Forward Tag</i>\n<i>💎 44 Premium Emojis!</i>"""
         markup = types.InlineKeyboardMarkup(row_width=2)
         markup.add(
-            colored_btn("START ✅", callback="join_on", color="success"),
-            colored_btn("OFF 🔴", callback="join_off", color="danger")
+            colored_btn("START", callback="join_on", color="success"),
+            colored_btn("OFF", callback="join_off", color="danger")
         )
         markup.add(colored_btn("Welcome", callback="welcome_menu", color="primary"), colored_btn("Stats", callback="stats", color="success"))
         send_html(message.chat.id, text, reply_markup=markup)
@@ -616,7 +629,7 @@ def main():
     logger.info(f"💎 Premium Emojis: {len(PREMIUM_EMOJI_MAP)} LOADED!")
     logger.info(f"📥 Join Accept: {'ON' if data.get('join_enabled', True) else 'OFF'}")
     logger.info(f"💾 Data Path: {DATA_FILE}")
-    logger.info(f"🎯 START/OFF BUTTONS ACTIVE!")
+    logger.info(f"🎯 BUTTONS: Emoji prefix color system!")
     bot.infinity_polling(timeout=10, long_polling_timeout=5)
 
 if __name__ == "__main__":
