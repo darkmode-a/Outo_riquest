@@ -147,10 +147,18 @@ def extract_button_icon(text):
             return clean_text, icon_id
     return text, None
 
+# ⭐ FIXED: colored_btn - icon hai to style nahi, style hai to icon nahi
 def colored_btn(text, url=None, callback=None, color="primary", icon_emoji_id=None):
-    if url:
-        return types.InlineKeyboardButton(text, url=url, style=color, icon_custom_emoji_id=icon_emoji_id)
-    return types.InlineKeyboardButton(text, callback_data=callback, style=color, icon_custom_emoji_id=icon_emoji_id)
+    if icon_emoji_id:
+        # Icon ke saath button (colored nahi, icon dikhega)
+        if url:
+            return types.InlineKeyboardButton(text, url=url, icon_custom_emoji_id=icon_emoji_id)
+        return types.InlineKeyboardButton(text, callback_data=callback, icon_custom_emoji_id=icon_emoji_id)
+    else:
+        # Bina icon ke colored button
+        if url:
+            return types.InlineKeyboardButton(text, url=url, style=color)
+        return types.InlineKeyboardButton(text, callback_data=callback, style=color)
 
 def build_keyboard_with_rows(buttons_list):
     mrk = types.InlineKeyboardMarkup(row_width=2)
@@ -302,8 +310,8 @@ def start(message: types.Message):
         text = f"""╔══════════════════════╗\n║  🏆 <b>ALL-IN-ONE BOT</b>  ║\n╚══════════════════════╝\n👑 <b>Admin:</b> {user.first_name}\n📋 /welcome | /stats | /pin | /help\n\n📥 <b>Join Accept:</b> {join_status}\n\n<i>💡 Admin = Normal | Forward = Forward Tag</i>\n<i>💎 44 Premium Emojis!</i>"""
         markup = types.InlineKeyboardMarkup(row_width=2)
         markup.add(
-            colored_btn("START ✅", callback="join_on", color="success"),
-            colored_btn("OFF 🔴", callback="join_off", color="danger")
+            colored_btn("START ✅", callback="join_on", color="success", icon_emoji_id="6113743365826677162"),
+            colored_btn("OFF 🔴", callback="join_off", color="danger", icon_emoji_id="4992743110430687913")
         )
         markup.add(colored_btn("Welcome", callback="welcome_menu", color="primary"), colored_btn("Stats", callback="stats", color="success"))
         send_html(message.chat.id, text, reply_markup=markup)
