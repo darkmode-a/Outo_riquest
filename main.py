@@ -1,12 +1,11 @@
 import os, json, logging, html, re, random
 from datetime import datetime
-from telebot import TeleBot, types
-from telebot.types import MessageEntity
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatJoinRequest
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ChatJoinRequestHandler, MessageHandler, filters, ContextTypes
+from telegram.constants import ParseMode
 
 BOT_TOKEN = "8868540804:AAEmU9LCSYXxQHRFE5-XRBVHaiZm_ie2SvQ"
 ADMIN_IDS = [8498419947]
-
-# ═══════ PATHS (RENDER + BOTIFYHOST + LOCAL - SAB PE CHALEGA) ═══════
 DATA_FILE = os.path.join(os.getcwd(), "data.json")
 WELCOME_DIR = os.path.join(os.getcwd(), "welcome_files")
 os.makedirs(WELCOME_DIR, exist_ok=True)
@@ -74,8 +73,6 @@ DEFAULT_CAPTIONS = {
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-bot = TeleBot(BOT_TOKEN, threaded=True)
-
 DEFAULT_DATA = {
     "welcome_contents": [],
     "users": [],
@@ -89,17 +86,6 @@ def load_data():
         if os.path.exists(DATA_FILE):
             with open(DATA_FILE, 'r') as f:
                 loaded = json.load(f)
-                for item in loaded.get("welcome_contents", []):
-                    if "caption_entities" in item and item["caption_entities"]:
-                        entities = []
-                        for e_dict in item["caption_entities"]:
-                            entities.append(MessageEntity(
-                                type=e_dict.get("type","custom_emoji"),
-                                offset=e_dict.get("offset",0),
-                                length=e_dict.get("length",1),
-                                custom_emoji_id=e_dict.get("custom_emoji_id","")
-                            ))
-                        item["caption_entities"] = entities
                 for key in DEFAULT_DATA:
                     if key not in loaded:
                         loaded[key] = DEFAULT_DATA[key]
@@ -109,16 +95,8 @@ def load_data():
     return DEFAULT_DATA.copy()
 
 def save_data(d):
-    def conv(obj):
-        if isinstance(obj, MessageEntity):
-            return {"type": obj.type, "offset": obj.offset, "length": obj.length, "custom_emoji_id": obj.custom_emoji_id}
-        if isinstance(obj, dict):
-            return {k: conv(v) for k, v in obj.items()}
-        if isinstance(obj, list):
-            return [conv(i) for i in obj]
-        return obj
     with open(DATA_FILE, 'w') as f:
-        json.dump(conv(d), f, indent=4)
+        json.dump(d, f, indent=4)
 
 data = load_data()
 for key in DEFAULT_DATA:
@@ -136,92 +114,108 @@ def format_quotes(text):
         return ""
     return re.sub(r'"([^"]*)"', r'<blockquote>\1</blockquote>', text)
 
-def convert_premium_emojis(text):
-    if not text:
-        return text, []
-    entities = []
-    for plan_emoji, emoji_ids in PREMIUM_EMOJI_MAP.items():
-        start = 0
-        while True:
-            pos = text.find(plan_emoji, start)
-            if pos == -1:
-                break
-            utf16_offset = len(text[:pos].encode('utf-16-le')) // 2
-            utf16_length = len(plan_emoji.encode('utf-16-le')) // 2
-            selected_id = random.choice(emoji_ids)
-            entities.append(MessageEntity(
-                type="custom_emoji",
-                offset=utf16_offset,
-                length=utf16_length,
-                custom_emoji_id=selected_id
-            ))
-            start = pos + len(plan_emoji)
-    entities.sort(key=lambda x: x.offset)
-    return text, entities
-
-def extract_button_icon(text):
-    for plan_emoji, emoji_ids in PREMIUM_EMOJI_MAP.items():
-        if plan_emoji in text:
-            icon_id = random.choice(emoji_ids)
-            clean_text = text.replace(plan_emoji, "").strip()
-            return clean_text, icon_id
-    return text, None
-
-# ⭐ FIXED: colored_btn - icon hai to style nahi, style hai to icon nahi
-def colored_btn(text, url=None, callback=None, color="primary", icon_emoji_id=None):
-    if icon_emoji_id:
-        if url:
-            return types.InlineKeyboardButton(text, url=url, icon_custom_emoji_id=icon_emoji_id)
-        return types.InlineKeyboardButton(text, callback_data=callback, icon_custom_emoji_id=icon_emoji_id)
-    else:
-        if url:
-            return types.InlineKeyboardButton(text, url=url, style=color)
-        return types.InlineKeyboardButton(text, callback_data=callback, style=color)
+# ═══════ PTB COLORED BUTTON ═══════
+def colored_btn(text, url=None, callback=None, color="primary"):
+    """PTB style colored button"""
+    if url:
+        return InlineKeyboardButton(text, url=url, style=color)
+    return InlineKeyboardButton(text, callback_data=callback, style=color)
 
 def build_keyboard_with_rows(buttons_list):
-    mrk = types.InlineKeyboardMarkup(row_width=2)
+    keyboard = []
     buttons_by_row = {}
     for b in buttons_list:
         row = b.get("row", 0)
         if row not in buttons_by_row:
             buttons_by_row[row] = []
-        icon_id = b.get("icon_emoji_id", None)
-        buttons_by_row[row].append(colored_btn(
-            b['text'], url=b["url"], color=b.get("color","primary"), icon_emoji_id=icon_id
+        buttons_by_row[row].append(InlineKeyboardButton(
+            b['text'],
+            url=b.get("url"),
+            style=b.get("color", "primary")
         ))
     for row_num in sorted(buttons_by_row.keys()):
-        row_buttons = buttons_by_row[row_num]
-        if len(row_buttons) == 1:
-            mrk.add(row_buttons[0])
-        else:
-            mrk.add(*row_buttons)
-    return mrk
+        keyboard.append(buttons_by_row[row_num])
+    return InlineKeyboardMarkup(keyboard)
 
-def send(chat_id, text, reply_markup=None, **kwargs):
-    if isinstance(text, str):
-        clean_txt, emoji_entities = convert_premium_emojis(text)
-        if emoji_entities:
-            return bot.send_message(chat_id, clean_txt, entities=emoji_entities, reply_markup=reply_markup, **kwargs)
-        return bot.send_message(chat_id, clean_txt, reply_markup=reply_markup, parse_mode="HTML", **kwargs)
-    return bot.send_message(chat_id, text, reply_markup=reply_markup, **kwargs)
+# ═══════ JOIN HANDLER ═══════
+async def handle_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    join_request = update.chat_join_request
+    user = join_request.from_user
+    chat = join_request.chat
+    uid, name, chat_id, channel = user.id, user.first_name, chat.id, chat.title
+    
+    if not data.get("join_enabled", True):
+        logger.info(f"⏸️ JOIN OFF - Request pending: {name}")
+        return
+    
+    ckey = str(chat_id)
+    if "channels" not in data["stats"]:
+        data["stats"]["channels"] = {}
+    if ckey not in data["stats"]["channels"]:
+        data["stats"]["channels"][ckey] = {"name": channel, "approved": 0}
+    
+    try:
+        await join_request.approve()
+        data["stats"]["approved"] += 1
+        data["stats"]["channels"][ckey]["approved"] += 1
+        if uid not in data["users"]:
+            data["users"].append(uid)
+        save_data(data)
+        
+        sent = await send_welcome_contents(context, uid, name, channel)
+        if not sent:
+            await context.bot.send_message(uid, f"✅ Welcome {html.escape(name)}! ✅")
+    except Exception as e:
+        logger.error(f"Join: {e}")
 
-def send_html(chat_id, text, reply_markup=None):
-    clean_txt, emoji_entities = convert_premium_emojis(text)
-    if emoji_entities:
-        return bot.send_message(chat_id, clean_txt, entities=emoji_entities, reply_markup=reply_markup, disable_web_page_preview=True)
-    return bot.send_message(chat_id, clean_txt, reply_markup=reply_markup, parse_mode="HTML", disable_web_page_preview=True)
+async def send_welcome_contents(context, chat_id, user_name="User", channel_name="Channel"):
+    pin_sent = await send_pinned_content(context, chat_id, user_name, channel_name)
+    contents = data.get("welcome_contents", [])
+    sent = False
+    
+    if contents:
+        for item in contents:
+            try:
+                markup = None
+                if item.get("buttons"):
+                    markup = build_keyboard_with_rows(item["buttons"])
+                
+                safe_name = html.escape(user_name) if user_name else "User"
+                safe_channel = html.escape(channel_name) if channel_name else "Channel"
+                
+                if item["type"] == "text":
+                    txt = item["content"].replace("{name}", safe_name).replace("{channel}", safe_channel)
+                    txt = format_quotes(txt)
+                    if not pin_sent:
+                        await context.bot.send_message(chat_id, txt, reply_markup=markup, parse_mode=ParseMode.HTML)
+                    sent = True
+                    
+                elif item["type"] in ["video","photo","document","voice","audio"]:
+                    file_path = item.get("content", "")
+                    if not os.path.exists(file_path):
+                        continue
+                    
+                    cap = item.get("caption","").replace("{name}", safe_name).replace("{channel}", safe_channel)
+                    cap = format_quotes(cap)
+                    
+                    with open(file_path, 'rb') as f:
+                        if item["type"] == "video":
+                            await context.bot.send_video(chat_id, f, caption=cap, reply_markup=markup)
+                        elif item["type"] == "photo":
+                            await context.bot.send_photo(chat_id, f, caption=cap, reply_markup=markup)
+                        elif item["type"] == "document":
+                            await context.bot.send_document(chat_id, f, caption=cap, reply_markup=markup)
+                        elif item["type"] == "voice":
+                            await context.bot.send_voice(chat_id, f, caption=cap)
+                        elif item["type"] == "audio":
+                            await context.bot.send_audio(chat_id, f, caption=cap)
+                    sent = True
+            except Exception as e:
+                logger.error(f"Welcome send error: {e}")
+    
+    return sent or pin_sent
 
-def send_media_with_caption(func, chat_id, file_id, caption="", reply_markup=None, **kwargs):
-    if 'filename' in kwargs:
-        kwargs['visible_file_name'] = kwargs.pop('filename')
-    if caption:
-        clean_cap, cap_entities = convert_premium_emojis(caption)
-        if cap_entities:
-            return func(chat_id, file_id, caption=clean_cap, caption_entities=cap_entities, reply_markup=reply_markup, **kwargs)
-        return func(chat_id, file_id, caption=clean_cap, reply_markup=reply_markup, **kwargs)
-    return func(chat_id, file_id, reply_markup=reply_markup, **kwargs)
-
-def send_pinned_content(chat_id, user_name="User", channel_name="Channel"):
+async def send_pinned_content(context, chat_id, user_name="User", channel_name="Channel"):
     pinned_idx = data.get("pinned_content")
     if pinned_idx is not None:
         contents = data.get("welcome_contents", [])
@@ -233,159 +227,86 @@ def send_pinned_content(chat_id, user_name="User", channel_name="Channel"):
                 markup = None
                 if item.get("buttons"):
                     markup = build_keyboard_with_rows(item["buttons"])
+                
                 if item["type"] == "text":
                     txt = item["content"].replace("{name}", safe_name).replace("{channel}", safe_channel)
                     txt = format_quotes(txt)
-                    send(chat_id, f"📌 PINNED\n━━━━━━━━━━━━━\n{txt}", reply_markup=markup)
+                    await context.bot.send_message(chat_id, f"📌 PINNED\n━━━━━━━━━━━━━\n{txt}", reply_markup=markup, parse_mode=ParseMode.HTML)
                     return True
+                    
                 elif item["type"] in ["video","photo","document","voice","audio"]:
                     file_path = item.get("content", "")
                     if not os.path.exists(file_path):
                         return False
+                    
                     cap = item.get("caption","").replace("{name}", safe_name).replace("{channel}", safe_channel)
                     cap = format_quotes(cap)
+                    
                     with open(file_path, 'rb') as f:
                         if item["type"] == "video":
-                            send_media_with_caption(bot.send_video, chat_id, f, cap, reply_markup=markup)
+                            await context.bot.send_video(chat_id, f, caption=cap, reply_markup=markup)
                         elif item["type"] == "photo":
-                            send_media_with_caption(bot.send_photo, chat_id, f, cap, reply_markup=markup)
+                            await context.bot.send_photo(chat_id, f, caption=cap, reply_markup=markup)
                         elif item["type"] == "document":
-                            send_media_with_caption(bot.send_document, chat_id, f, cap, reply_markup=markup, visible_file_name=item.get("filename","file"))
+                            await context.bot.send_document(chat_id, f, caption=cap, reply_markup=markup)
                         elif item["type"] == "voice":
-                            send_media_with_caption(bot.send_voice, chat_id, f, cap)
+                            await context.bot.send_voice(chat_id, f, caption=cap)
                         elif item["type"] == "audio":
-                            send_media_with_caption(bot.send_audio, chat_id, f, cap)
+                            await context.bot.send_audio(chat_id, f, caption=cap)
                     return True
             except Exception as e:
                 logger.error(f"Pin: {e}")
     return False
 
-def send_welcome_contents(chat_id, user_name="User", channel_name="Channel"):
-    pin_sent = send_pinned_content(chat_id, user_name, channel_name)
-    contents = data.get("welcome_contents", [])
-    sent = False
-    if contents:
-        for item in contents:
-            try:
-                markup = None
-                if item.get("buttons"):
-                    markup = build_keyboard_with_rows(item["buttons"])
-                safe_name = html.escape(user_name) if user_name else "User"
-                safe_channel = html.escape(channel_name) if channel_name else "Channel"
-                if item["type"] == "text":
-                    txt = item["content"].replace("{name}", safe_name).replace("{channel}", safe_channel)
-                    txt = format_quotes(txt)
-                    if not pin_sent:
-                        send(chat_id, txt, reply_markup=markup)
-                    sent = True
-                elif item["type"] in ["video","photo","document","voice","audio"]:
-                    file_path = item.get("content", "")
-                    if not os.path.exists(file_path):
-                        continue
-                    cap = item.get("caption","").replace("{name}", safe_name).replace("{channel}", safe_channel)
-                    cap = format_quotes(cap)
-                    with open(file_path, 'rb') as f:
-                        if item["type"] == "video":
-                            send_media_with_caption(bot.send_video, chat_id, f, cap, reply_markup=markup)
-                        elif item["type"] == "photo":
-                            send_media_with_caption(bot.send_photo, chat_id, f, cap, reply_markup=markup)
-                        elif item["type"] == "document":
-                            send_media_with_caption(bot.send_document, chat_id, f, cap, reply_markup=markup, visible_file_name=item.get("filename","file"))
-                        elif item["type"] == "voice":
-                            send_media_with_caption(bot.send_voice, chat_id, f, cap)
-                        elif item["type"] == "audio":
-                            send_media_with_caption(bot.send_audio, chat_id, f, cap)
-                    sent = True
-            except Exception as e:
-                logger.error(f"Welcome: {e}")
-    return sent or pin_sent
-
-# ═══════ JOIN HANDLER ═══════
-@bot.chat_join_request_handler()
-def handle_join(update: types.ChatJoinRequest):
-    user = update.from_user
-    chat = update.chat
-    uid, name, chat_id, channel = user.id, user.first_name, chat.id, chat.title
-    ckey = str(chat_id)
-    
-    if not data.get("join_enabled", True):
-        logger.info(f"⏸️ JOIN OFF - Request pending: {name}")
-        return
-    
-    if "channels" not in data["stats"]:
-        data["stats"]["channels"] = {}
-    if ckey not in data["stats"]["channels"]:
-        data["stats"]["channels"][ckey] = {"name": channel, "approved": 0}
-    
-    try:
-        bot.approve_chat_join_request(chat_id, uid)
-        data["stats"]["approved"] += 1
-        data["stats"]["channels"][ckey]["approved"] += 1
-        if uid not in data["users"]:
-            data["users"].append(uid)
-        save_data(data)
-        sent = send_welcome_contents(uid, name, channel)
-        if not sent:
-            send(uid, f"✅ Welcome {html.escape(name)}! ✅")
-    except Exception as e:
-        logger.error(f"Join: {e}")
-
 # ═══════ COMMANDS ═══════
-@bot.message_handler(commands=['start'])
-def start(message: types.Message):
-    user = message.from_user
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
     if user.id not in data["users"]:
         data["users"].append(user.id)
         save_data(data)
     
     if is_admin(user.id):
         join_status = "🟢 ON" if data.get("join_enabled", True) else "🔴 OFF"
-        text = f"""╔══════════════════════╗\n║  🏆 <b>ALL-IN-ONE BOT</b>  ║\n╚══════════════════════╝\n👑 <b>Admin:</b> {user.first_name}\n📋 /welcome | /stats | /pin | /help\n\n📥 <b>Join Accept:</b> {join_status}\n\n<i>💡 Admin = Normal | Forward = Forward Tag</i>\n<i>💎 44 Premium Emojis!</i>"""
-        markup = types.InlineKeyboardMarkup(row_width=2)
-        markup.add(
-            colored_btn("START ✅", callback="join_on", color="success"),
-            colored_btn("OFF 🔴", callback="join_off", color="danger")
-        )
-        markup.add(
-            colored_btn("Welcome", callback="welcome_menu", color="primary"),
-            colored_btn("Stats", callback="stats", color="success")
-        )
-        send_html(message.chat.id, text, reply_markup=markup)
+        text = f"""╔══════════════════════╗\n║  🏆 <b>ALL-IN-ONE BOT</b>  ║\n╚══════════════════════╝\n👑 <b>Admin:</b> {user.first_name}\n📋 /welcome | /stats | /pin | /help\n\n📥 <b>Join Accept:</b> {join_status}\n\n<i>💎 44 Premium Emojis!</i>"""
+        keyboard = [
+            [colored_btn("START ✅", callback="join_on", color="success")],
+            [colored_btn("OFF 🔴", callback="join_off", color="danger")],
+            [colored_btn("Welcome", callback="welcome_menu", color="primary"), colored_btn("Stats", callback="stats", color="success")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
     else:
-        sent = send_welcome_contents(message.chat.id, user.first_name, "Channel")
+        sent = await send_welcome_contents(context, user.id, user.first_name, "Channel")
         if not sent:
-            send(message.chat.id, "✅ Bot Active! ✅")
+            await update.message.reply_text("✅ Bot Active! ✅")
 
-@bot.message_handler(commands=['pin'])
-def pin_cmd(message: types.Message):
-    if not is_admin(message.from_user.id):
-        send(message.chat.id, "❌ Admin only!")
+async def pin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("❌ Admin only!")
         return
     contents = data.get("welcome_contents", [])
     if not contents:
-        send(message.chat.id, "⚠️ Pehle /welcome se content add karo!")
+        await update.message.reply_text("⚠️ Pehle /welcome se content add karo!")
         return
     t = "📌 <b>PIN CONTENT</b>\n\n"
     for i, item in enumerate(contents, 1):
         prev = item.get("content", item.get("filename", ""))[:30] if item["type"] == "text" else item.get("filename", item["type"].upper())
         t += f"  {i}. {'📝' if item['type']=='text' else '📁'} {prev}\n"
     t += "\n✏️ Number (0=unpin):"
-    user_states[message.from_user.id] = "pin_select"
-    send_html(message.chat.id, t)
+    user_states[update.effective_user.id] = "pin_select"
+    await update.message.reply_text(t, parse_mode=ParseMode.HTML)
 
-@bot.message_handler(commands=['unpin'])
-def unpin_cmd(message: types.Message):
-    if not is_admin(message.from_user.id):
-        send(message.chat.id, "❌ Admin only!")
+async def unpin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("❌ Admin only!")
         return
     data["pinned_content"] = None
     save_data(data)
-    send(message.chat.id, "✅ Pin removed!")
+    await update.message.reply_text("✅ Pin removed!")
 
-@bot.message_handler(commands=['welcome'])
-def welcome_cmd(message: types.Message):
-    if not is_admin(message.from_user.id):
-        send(message.chat.id, "❌ Admin only!")
+async def welcome_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("❌ Admin only!")
         return
     contents = data.get("welcome_contents", [])
     pinned = data.get("pinned_content")
@@ -399,57 +320,57 @@ def welcome_cmd(message: types.Message):
             t = item["type"]
             prev = item["content"][:30] if t == "text" else item.get("filename", t.upper())
             text += f"  {i}. {'📝' if t=='text' else '📁'} {prev} [{len(item.get('buttons',[]))}🔘] {'📌' if pinned==i-1 else ''}\n"
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(colored_btn("Add Text", callback="add_text", color="primary"), colored_btn("Add File", callback="add_file", color="success"))
-    markup.add(colored_btn("Add Button", callback="btn_add", color="danger"), colored_btn("Pin Content", callback="pin_menu", color="primary"))
-    markup.add(colored_btn("Edit", callback="edit_menu", color="danger"), colored_btn("Delete", callback="delete_menu", color="danger"))
-    markup.add(colored_btn("Preview", callback="preview", color="success"), colored_btn("Clear All", callback="clear", color="danger"))
-    send_html(message.chat.id, text, reply_markup=markup)
+    
+    keyboard = [
+        [colored_btn("Add Text", callback="add_text", color="primary"), colored_btn("Add File", callback="add_file", color="success")],
+        [colored_btn("Add Button", callback="btn_add", color="danger"), colored_btn("Pin Content", callback="pin_menu", color="primary")],
+        [colored_btn("Edit", callback="edit_menu", color="danger"), colored_btn("Delete", callback="delete_menu", color="danger")],
+        [colored_btn("Preview", callback="preview", color="success"), colored_btn("Clear All", callback="clear", color="danger")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
-@bot.message_handler(commands=['stats'])
-def stats_cmd(message: types.Message):
+async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ch = data.get("stats", {}).get("channels", {})
     pinned = data.get("pinned_content")
     join_status = "🟢 ON" if data.get("join_enabled", True) else "🔴 OFF"
     text = f"📊 <b>STATS</b>\n\n✅ Approved: {data['stats']['approved']}\n📢 Channels: {len(ch)}\n📝 Contents: {len(data.get('welcome_contents',[]))}\n👥 Users: {len(data.get('users',[]))}\n💎 Emojis: {len(PREMIUM_EMOJI_MAP)}\n📥 Join: {join_status}"
-    if pinned is not None:
-        text += f"\n📌 Pinned: #{pinned+1}"
-    send_html(message.chat.id, text)
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
-@bot.message_handler(commands=['help'])
-def help_cmd(message: types.Message):
+async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = "📋 <b>COMMANDS ✅</b>\n\n/welcome | /stats | /pin | /unpin | /help\n\n📥 <b>START/OFF</b> se join on/off karo!\n\n💡 <b>Button Format:</b>\n<code>Text ✅ | URL/color/row:1</code>"
-    send_html(message.chat.id, text)
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 # ═══════ CALLBACKS ═══════
-@bot.callback_query_handler(func=lambda call: True)
-def handle_callbacks(call: types.CallbackQuery):
-    uid = call.from_user.id
+async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    uid = query.from_user.id
+    
     if not is_admin(uid):
-        bot.answer_callback_query(call.id, "❌ Admin only!", show_alert=True)
+        await query.message.reply_text("❌ Admin only!")
         return
-    cmd = call.data
+    
+    cmd = query.data
     contents = data.get("welcome_contents", [])
-    bot.answer_callback_query(call.id)
     
     if cmd == "join_on":
         data["join_enabled"] = True
         save_data(data)
-        send(call.message.chat.id, "🟢 <b>Join Accept ON!</b>")
+        await query.message.reply_text("🟢 <b>Join Accept ON!</b>", parse_mode=ParseMode.HTML)
         return
     elif cmd == "join_off":
         data["join_enabled"] = False
         save_data(data)
-        send(call.message.chat.id, "🔴 <b>Join Accept OFF!</b>")
+        await query.message.reply_text("🔴 <b>Join Accept OFF!</b>", parse_mode=ParseMode.HTML)
         return
-    
-    if cmd == "welcome_menu":
-        welcome_cmd(call.message)
+    elif cmd == "welcome_menu":
+        await welcome_cmd(update, context)
     elif cmd == "stats":
-        stats_cmd(call.message)
+        await stats_cmd(update, context)
     elif cmd == "pin_menu":
         if not contents:
-            send(call.message.chat.id, "⚠️ Pehle content add!")
+            await query.message.reply_text("⚠️ Pehle content add!")
             return
         t = "📌 <b>PIN CONTENT</b>\n\n"
         for i, item in enumerate(contents, 1):
@@ -457,16 +378,16 @@ def handle_callbacks(call: types.CallbackQuery):
             t += f"{i}. {'📝' if item['type']=='text' else '📁'} {prev}\n"
         t += "\nNumber (0=unpin):"
         user_states[uid] = "pin_select"
-        send_html(call.message.chat.id, t)
+        await query.message.reply_text(t, parse_mode=ParseMode.HTML)
     elif cmd == "add_text":
         user_states[uid] = "adding_text"
-        send_html(call.message.chat.id, "📝 Welcome text ✅\n\nUse {name} | {channel} | \"text\" for quotes\n\n/cancel")
+        await query.message.reply_text("📝 Welcome text ✅\n\nUse {name} | {channel} | \"text\" for quotes\n\n/cancel")
     elif cmd == "add_file":
         user_states[uid] = "adding_file"
-        send_html(call.message.chat.id, "📁 File bhejo 📁\n\nCaption likho - ✅😂🔥⭐ sab auto premium!\n\n/cancel")
+        await query.message.reply_text("📁 File bhejo 📁\n\nCaption likho - ✅😂🔥⭐ sab auto premium!\n\n/cancel")
     elif cmd == "btn_add":
         if not contents:
-            send(call.message.chat.id, "⚠️ Pehle text add!")
+            await query.message.reply_text("⚠️ Pehle text add!")
             return
         user_states[uid] = "adding_button"
         t = "🔘 <b>ADD BUTTONS</b>\n\nKis content ke niche?\n\n"
@@ -474,157 +395,103 @@ def handle_callbacks(call: types.CallbackQuery):
             prev = item.get("content", item.get("filename", ""))[:30] if item["type"] == "text" else item.get("filename", item["type"].upper())
             t += f"<b>Content {i}:</b> {'📝' if item['type']=='text' else '📁'} {prev}\n"
         t += "\n<b>Format:</b>\n<code>Content Number\nButton1 ✅ | URL/blue/row:1\nButton2 🚀 | URL/green/row:1</code>\n\n/cancel"
-        send_html(call.message.chat.id, t)
+        await query.message.reply_text(t, parse_mode=ParseMode.HTML)
     elif cmd == "edit_menu":
         if not contents:
-            send(call.message.chat.id, "⚠️ No content!")
+            await query.message.reply_text("⚠️ No content!")
             return
         t = "✏️ <b>SELECT ✅</b>\n\n"
         for i, item in enumerate(contents, 1):
             t += f"{i}. {'📝' if item['type']=='text' else '📁'} {item.get('content',item.get('filename',''))[:30]}\n"
         t += "\nNumber:"
         user_states[uid] = "edit_select"
-        send_html(call.message.chat.id, t)
+        await query.message.reply_text(t, parse_mode=ParseMode.HTML)
     elif cmd == "delete_menu":
         if not contents:
-            send(call.message.chat.id, "⚠️ No content!")
+            await query.message.reply_text("⚠️ No content!")
             return
         t = "🗑️ <b>SELECT</b>\n\n"
         for i, item in enumerate(contents, 1):
             t += f"{i}. {'📝' if item['type']=='text' else '📁'} {item.get('content',item.get('filename',''))[:30]}\n"
         t += "\nNumber (0=cancel):"
         user_states[uid] = "delete_select"
-        send_html(call.message.chat.id, t)
+        await query.message.reply_text(t, parse_mode=ParseMode.HTML)
     elif cmd == "preview":
         if not contents:
-            send(call.message.chat.id, "⚠️ No content!")
+            await query.message.reply_text("⚠️ No content!")
             return
         t = "👁️ <b>PREVIEW</b>\n\n"
         for i, item in enumerate(contents, 1):
             t += f"{i}. {'📝' if item['type']=='text' else '📁'} {item.get('content',item.get('filename',''))[:50]}\n"
-        send_html(call.message.chat.id, t)
+        await query.message.reply_text(t, parse_mode=ParseMode.HTML)
     elif cmd == "clear":
         data["welcome_contents"] = []
         data["pinned_content"] = None
         save_data(data)
-        send(call.message.chat.id, "✅ Cleared!")
+        await query.message.reply_text("✅ Cleared!")
 
-# ═══════ FILE UPLOAD ═══════
-@bot.message_handler(content_types=['video', 'photo', 'document', 'voice', 'audio'],
-                     func=lambda m: is_admin(m.from_user.id) and user_states.get(m.from_user.id) == "adding_file")
-def handle_file_upload(message: types.Message):
-    uid = message.from_user.id
-    fname = f"w_{datetime.now():%H%M%S}"
-    saved = False
-    new_item = {"type": "", "content": "", "buttons": []}
-    admin_caption = message.caption
-    try:
-        if message.video:
-            fi = bot.get_file(message.video.file_id)
-            d = bot.download_file(fi.file_path)
-            fp = os.path.join(WELCOME_DIR, f"{fname}.mp4")
-            with open(fp, 'wb') as f:
-                f.write(d)
-            cap = admin_caption if admin_caption else DEFAULT_CAPTIONS["video"]
-            clean_cap, cap_entities = convert_premium_emojis(cap)
-            new_item = {"type": "video", "content": fp, "caption": clean_cap, "caption_entities": cap_entities, "buttons": []}
-            saved = True
-        elif message.photo:
-            fi = bot.get_file(message.photo[-1].file_id)
-            d = bot.download_file(fi.file_path)
-            fp = os.path.join(WELCOME_DIR, f"{fname}.jpg")
-            with open(fp, 'wb') as f:
-                f.write(d)
-            cap = admin_caption if admin_caption else DEFAULT_CAPTIONS["photo"]
-            clean_cap, cap_entities = convert_premium_emojis(cap)
-            new_item = {"type": "photo", "content": fp, "caption": clean_cap, "caption_entities": cap_entities, "buttons": []}
-            saved = True
-        elif message.document:
-            fi = bot.get_file(message.document.file_id)
-            d = bot.download_file(fi.file_path)
-            ext = os.path.splitext(message.document.file_name or ".file")[1]
-            fp = os.path.join(WELCOME_DIR, f"{fname}{ext}")
-            with open(fp, 'wb') as f:
-                f.write(d)
-            cap = admin_caption if admin_caption else DEFAULT_CAPTIONS["document"]
-            clean_cap, cap_entities = convert_premium_emojis(cap)
-            new_item = {"type": "document", "content": fp, "filename": message.document.file_name or "file", "caption": clean_cap, "caption_entities": cap_entities, "buttons": []}
-            saved = True
-        elif message.voice:
-            fi = bot.get_file(message.voice.file_id)
-            d = bot.download_file(fi.file_path)
-            fp = os.path.join(WELCOME_DIR, f"{fname}.ogg")
-            with open(fp, 'wb') as f:
-                f.write(d)
-            cap = admin_caption if admin_caption else DEFAULT_CAPTIONS["voice"]
-            clean_cap, cap_entities = convert_premium_emojis(cap)
-            new_item = {"type": "voice", "content": fp, "caption": clean_cap, "caption_entities": cap_entities, "buttons": []}
-            saved = True
-        elif message.audio:
-            fi = bot.get_file(message.audio.file_id)
-            d = bot.download_file(fi.file_path)
-            fp = os.path.join(WELCOME_DIR, f"{fname}.mp3")
-            with open(fp, 'wb') as f:
-                f.write(d)
-            cap = admin_caption if admin_caption else DEFAULT_CAPTIONS["audio"]
-            clean_cap, cap_entities = convert_premium_emojis(cap)
-            new_item = {"type": "audio", "content": fp, "caption": clean_cap, "caption_entities": cap_entities, "buttons": []}
-            saved = True
-    except Exception as e:
-        logger.error(f"File: {e}")
+# ═══════ MESSAGE HANDLER ═══════
+async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    uid = user.id
     
-    if saved:
-        data["welcome_contents"].append(new_item)
-        save_data(data)
-        user_states.pop(uid, None)
-        send(message.chat.id, "✅ File added! /welcome")
-    else:
-        user_states.pop(uid, None)
-        send(message.chat.id, "❌ Failed!")
-
-# ═══════ STATES HANDLER ═══════
-@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and user_states.get(m.from_user.id) in ["adding_text", "adding_button", "edit_select", "delete_select", "pin_select"])
-def handle_states(message: types.Message):
-    uid = message.from_user.id
+    if not is_admin(uid):
+        # User → Admin forward
+        if uid not in data["users"]:
+            data["users"].append(uid)
+            save_data(data)
+        for aid in ADMIN_IDS:
+            try:
+                await update.message.forward(aid)
+            except:
+                pass
+        await update.message.reply_text("✅ Message sent to admin!")
+        return
+    
+    # Admin states
     state = user_states.get(uid, "")
-    if message.text == '/cancel':
+    msg_text = update.message.text or ""
+    
+    if msg_text == '/cancel':
         user_states.pop(uid, None)
-        send(message.chat.id, "❌ Cancelled\n/welcome")
+        await update.message.reply_text("❌ Cancelled\n/welcome")
         return
     
     if state == "pin_select":
         try:
-            idx = int(message.text.strip()) - 1
+            idx = int(msg_text.strip()) - 1
             contents = data.get("welcome_contents", [])
             if idx == -1:
                 data["pinned_content"] = None
                 save_data(data)
-                send(message.chat.id, "✅ Pin removed!")
+                await update.message.reply_text("✅ Pin removed!")
             elif 0 <= idx < len(contents):
                 data["pinned_content"] = idx
                 save_data(data)
                 prev = contents[idx].get("content", contents[idx].get("filename", ""))[:30]
-                send(message.chat.id, f"📌 <b>PINNED!</b>\n\n#{idx+1}: {prev}...")
+                await update.message.reply_text(f"📌 <b>PINNED!</b>\n\n#{idx+1}: {prev}...", parse_mode=ParseMode.HTML)
             else:
-                send(message.chat.id, "❌ Invalid!")
+                await update.message.reply_text("❌ Invalid!")
         except:
-            send(message.chat.id, "❌ Number!")
+            await update.message.reply_text("❌ Number!")
         user_states.pop(uid, None)
+    
     elif state == "adding_text":
-        data["welcome_contents"].append({"type": "text", "content": message.text, "buttons": []})
+        data["welcome_contents"].append({"type": "text", "content": msg_text, "buttons": []})
         save_data(data)
         user_states.pop(uid, None)
-        send(message.chat.id, "✅ Text added! /welcome")
+        await update.message.reply_text("✅ Text added! /welcome")
+    
     elif state == "adding_button":
-        lines = message.text.strip().split('\n')
+        lines = msg_text.strip().split('\n')
         try:
             content_idx = int(lines[0].strip()) - 1
         except:
-            send(message.chat.id, "❌ Pehli line: Content Number!\n\n/cancel")
+            await update.message.reply_text("❌ Pehli line: Content Number!\n\n/cancel")
             return
         contents = data.get("welcome_contents", [])
         if content_idx < 0 or content_idx >= len(contents):
-            send(message.chat.id, "❌ Invalid Content Number!\n\n/cancel")
+            await update.message.reply_text("❌ Invalid Content Number!\n\n/cancel")
             return
         added = 0
         for line in lines[1:]:
@@ -650,50 +517,51 @@ def handle_states(message: types.Message):
                 btn_color = COLOR_MAP.get(c, "primary")
                 if "buttons" not in contents[content_idx]:
                     contents[content_idx]["buttons"] = []
-                clean_btn_text, icon_emoji_id = extract_button_icon(btn_text)
                 contents[content_idx]["buttons"].append({
-                    "text": clean_btn_text,
+                    "text": btn_text,
                     "url": btn_url,
                     "color": btn_color,
-                    "icon_emoji_id": icon_emoji_id,
                     "row": btn_row
                 })
                 added += 1
         if added > 0:
             save_data(data)
-            send(message.chat.id, f"✅ {added} buttons added to Content {content_idx+1}!\n/welcome")
+            await update.message.reply_text(f"✅ {added} buttons added to Content {content_idx+1}!\n/welcome")
         else:
-            send(message.chat.id, "❌ Koi button add nahi hua!\n\n/cancel")
+            await update.message.reply_text("❌ Koi button add nahi hua!\n\n/cancel")
         user_states.pop(uid, None)
+    
     elif state == "edit_select":
         contents = data.get("welcome_contents", [])
         try:
-            idx = int(message.text.strip()) - 1
+            idx = int(msg_text.strip()) - 1
             if 0 <= idx < len(contents):
                 user_states[uid] = f"edit_save_{idx}"
-                send(message.chat.id, f"✏️ Edit #{idx+1}:\n/cancel")
+                await update.message.reply_text(f"✏️ Edit #{idx+1}:\n/cancel")
             else:
                 user_states.pop(uid, None)
-                send(message.chat.id, "❌ Invalid!")
+                await update.message.reply_text("❌ Invalid!")
         except:
             user_states.pop(uid, None)
+    
     elif state.startswith("edit_save_"):
         idx = int(state.split("_")[-1])
         contents = data.get("welcome_contents", [])
-        if 0 <= idx < len(contents) and message.text:
+        if 0 <= idx < len(contents) and msg_text:
             old = contents[idx]
             if old["type"] != "text" and os.path.exists(old.get("content", "")):
                 os.remove(old["content"])
-            contents[idx] = {"type": "text", "content": message.text, "buttons": old.get("buttons", [])}
+            contents[idx] = {"type": "text", "content": msg_text, "buttons": old.get("buttons", [])}
             save_data(data)
         user_states.pop(uid, None)
-        send(message.chat.id, "✅ Updated! /welcome")
+        await update.message.reply_text("✅ Updated! /welcome")
+    
     elif state == "delete_select":
         contents = data.get("welcome_contents", [])
         try:
-            idx = int(message.text.strip()) - 1
+            idx = int(msg_text.strip()) - 1
             if idx == -1:
-                send(message.chat.id, "❌ Cancelled")
+                await update.message.reply_text("❌ Cancelled")
             elif 0 <= idx < len(contents):
                 if data.get("pinned_content") == idx:
                     data["pinned_content"] = None
@@ -703,96 +571,32 @@ def handle_states(message: types.Message):
                 if deleted["type"] != "text" and os.path.exists(deleted.get("content", "")):
                     os.remove(deleted["content"])
                 save_data(data)
-                send(message.chat.id, "✅ Deleted! /welcome")
+                await update.message.reply_text("✅ Deleted! /welcome")
         except:
             pass
         user_states.pop(uid, None)
-
-# ═══════ USER → ADMIN ═══════
-@bot.message_handler(content_types=['text', 'photo', 'video', 'document', 'voice', 'audio', 'sticker', 'animation'],
-                     func=lambda m: not is_admin(m.from_user.id))
-def user_to_admin(message: types.Message):
-    user = message.from_user
-    if user.id not in data["users"]:
-        data["users"].append(user.id)
-        save_data(data)
-    for aid in ADMIN_IDS:
-        try:
-            bot.forward_message(aid, message.chat.id, message.message_id)
-        except:
-            pass
-    try:
-        send(message.chat.id, "✅ Message sent to admin!")
-    except:
-        pass
-
-# ═══════ ADMIN BROADCAST ═══════
-@bot.message_handler(content_types=['text', 'photo', 'video', 'document', 'voice', 'audio', 'sticker', 'animation'],
-                     func=lambda m: is_admin(m.from_user.id) and not (m.text and m.text.startswith('/')))
-def admin_broadcast(message: types.Message):
-    users = data.get("users", [])
-    if not users:
-        send(message.chat.id, "⚠️ No users!")
-        return
-    sent = 0
-    failed = 0
-    blocked_users = []
-    is_forwarded = message.forward_from or message.forward_from_chat
     
-    for uid in users:
-        try:
-            if is_forwarded:
-                bot.forward_message(uid, message.chat.id, message.message_id)
-            else:
-                if message.text:
-                    send(uid, message.text)
-                elif message.photo:
-                    cap = message.caption or ""
-                    send_media_with_caption(bot.send_photo, uid, message.photo[-1].file_id, cap)
-                elif message.video:
-                    cap = message.caption or ""
-                    send_media_with_caption(bot.send_video, uid, message.video.file_id, cap)
-                elif message.document:
-                    cap = message.caption or ""
-                    send_media_with_caption(bot.send_document, uid, message.document.file_id, cap)
-                elif message.voice:
-                    cap = message.caption or ""
-                    send_media_with_caption(bot.send_voice, uid, message.voice.file_id, cap)
-                elif message.audio:
-                    cap = message.caption or ""
-                    send_media_with_caption(bot.send_audio, uid, message.audio.file_id, cap)
-                elif message.sticker:
-                    bot.send_sticker(uid, message.sticker.file_id)
-                elif message.animation:
-                    cap = message.caption or ""
-                    send_media_with_caption(bot.send_animation, uid, message.animation.file_id, cap)
-            sent += 1
-        except Exception as e:
-            error_msg = str(e)
-            if "Forbidden" in error_msg or "blocked" in error_msg.lower():
-                blocked_users.append(uid)
-            else:
-                logger.error(f"BC {uid}: {e}")
-            failed += 1
-    
-    if blocked_users:
-        for buid in blocked_users:
-            if buid in data["users"]:
-                data["users"].remove(buid)
-        save_data(data)
-    
-    report = f"✅ Sent: {sent}"
-    if failed > 0:
-        report += f"\n❌ Failed: {failed}"
-    if blocked_users:
-        report += f"\n🚫 Blocked (removed): {len(blocked_users)}"
-    send_html(message.chat.id, report)
+    else:
+        # Admin broadcast
+        users = data.get("users", [])
+        if not users:
+            await update.message.reply_text("⚠️ No users!")
+            return
+        sent = 0
+        for target_uid in users:
+            try:
+                await update.message.copy(target_uid)
+                sent += 1
+            except:
+                pass
+        await update.message.reply_text(f"✅ Sent: {sent}/{len(users)}")
 
 # ═══════ MAIN ═══════
 def main():
     logger.info("🤖 ALL-IN-ONE BOT STARTING...")
     logger.info(f"💾 Data Path: {DATA_FILE}")
     logger.info(f"📁 Welcome Dir: {WELCOME_DIR}")
+    
     if os.path.exists(DATA_FILE):
         try:
             with open(DATA_FILE, 'r') as f:
@@ -803,12 +607,32 @@ def main():
             global data
             data = DEFAULT_DATA.copy()
             save_data(data)
-    bot_info = bot.get_me()
-    logger.info(f"✅ @{bot_info.username}")
+    
+    application = Application.builder().token(BOT_TOKEN).build()
+    
+    # Join Request Handler
+    application.add_handler(ChatJoinRequestHandler(handle_join))
+    
+    # Command Handlers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("pin", pin_cmd))
+    application.add_handler(CommandHandler("unpin", unpin_cmd))
+    application.add_handler(CommandHandler("welcome", welcome_cmd))
+    application.add_handler(CommandHandler("stats", stats_cmd))
+    application.add_handler(CommandHandler("help", help_cmd))
+    
+    # Callback Handler
+    application.add_handler(CallbackQueryHandler(handle_callbacks))
+    
+    # Message Handler
+    application.add_handler(MessageHandler(filters.ALL, handle_messages))
+    
+    logger.info(f"✅ Bot starting...")
     logger.info(f"💎 Premium Emojis: {len(PREMIUM_EMOJI_MAP)} LOADED!")
     logger.info(f"📥 Join Accept: {'ON' if data.get('join_enabled', True) else 'OFF'}")
     logger.info(f"🎯 START/OFF BUTTONS ACTIVE!")
-    bot.infinity_polling(timeout=10, long_polling_timeout=5)
+    
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     main()
